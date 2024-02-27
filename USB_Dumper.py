@@ -1,86 +1,50 @@
-# -*- coding: utf-8 -*-
-import base64
 import os
-import random
-import time
 import shutil
-import stat
-import tkinter
-from tkinter import filedialog
-# Assuming 'img' variable is defined elsewhere or you have an alternative approach for the icon.
+import time
+import win32api
+import win32file
 
-USB = 'F:'  # Initial USB directory, set to F: for testing
-SAVE = 'C:/usbCopy'  # Default save directory
-OLD = []  # To store file directory for detecting changes in USB files
-drive_status = {chr(65 + i): 0 for i in range(26)}  # Using dictionary comprehension for A-Z drives
+SAVE_DIR = 'C:/usbCopy'  # Directory where USB contents will be saved
 
-# Function to copy USB contents
-def usb_walker():
-    global SAVE, USB
-    if os.path.exists(SAVE):
-        print('Deleting existing file!')
-        try:
-            os.chmod(SAVE, stat.S_IREAD | stat.S_IWRITE)
-            shutil.rmtree(SAVE)
-        except Exception as e:
-            print(e)
-            SAVE += 'NewFile' + str(random.random() * 10)
+def is_removable_drive(drive):
+    try:
+        drive_type = win32file.GetDriveType(drive)
+        # DRIVE_REMOVABLE refers to removable drives (e.g., USB flash drives)
+        return drive_type == win32file.DRIVE_REMOVABLE
+    except Exception as e:
+        print(f"Error checking drive type for {drive}: {e}")
+        return False
+def find_removable_drives():
+    drives = win32api.GetLogicalDriveStrings()
+    drives = drives.split('\000')[:-1]  # Split the string and remove the last empty item
+    return [drive for drive in drives if is_removable_drive(drive)]
 
-    print('FileName ' + SAVE)
-    print('Copying...')
+def copy_usb_contents(usb_drive, save_dir):
+    target_dir = os.path.join(save_dir, os.path.basename(usb_drive.strip(":/")))
+    if os.path.exists(target_dir):
+        print(f"Deleting existing directory: {target_dir}")
+        shutil.rmtree(target_dir)
+    print(f"Copying contents from {usb_drive} to {target_dir}...")
+    shutil.copytree(usb_drive, target_dir)
+    print("Copy completed.")
 
-    shutil.copytree(USB, SAVE)  # "Life is short, use Python"
-
-# Check if USB content has changed
-def get_usb():
-    global OLD
-    NEW = os.listdir(USB)
-    if len(NEW) == len(OLD):
-        print("USB content has not changed")
-        return 0
-    else:
-        OLD = NEW
-        return 1
-
-# Check if USB is present and copy its contents
-def usb_copy():
-    global USB
-    for i in range(26):
-        name = chr(i + ord('A')) + ':'
-        print(name)
-        if os.path.exists(name):
-            drive_status[chr(i + ord('A'))] = 1
-            print('Drive ' + chr(i + ord('A')) + ' exists')
-
+def monitor_usb_drives():
+    known_drives = set()
     while True:
-        for i in range(26):
-            name = chr(i + ord('A')) + ':'
-            if not os.path.exists(name):
-                drive_status[chr(i + ord('A'))] = 0
-            if os.path.exists(name) and drive_status[chr(i + ord('A'))] == 0:
-                USB = name
-                print("USB detected")
-                if get_usb():
-                    try:
-                        usb_walker()
-                    except Exception as e:
-                        print(e)
-
-        print("No USB detected, sleeping")
-        time.sleep(1)
-        print("Waking up")
-
-# GUI to change save directory
-def choose_dir():
-    global SAVE
-    SAVE = filedialog.askdirectory(initialdir="/", title='Pick a directory') + '/usbCopy'
-    print('Save in ' + SAVE)
-
-# Start button action
-def click_button():
-    root.withdraw()  # Hide the main window
-    usb_copy()
-
+        current_drives = set(find_removable_drives())
+        new_drives = current_drives - known_drives
+        if new_drives:
+            for drive in new_drives:
+                print(f"New USB drive detected: {drive}")
+                try:
+                    copy_usb_contents(drive, SAVE_DIR)
+                except Exception as e:
+                    print(f"Error copying contents from {drive}: {e}")
+            known_drives = current_drives
+        else:
+            print("No new USB detected, sleeping...")
+        time.sleep(5)  # Check every 5 seconds
 if __name__ == '__main__':
-    root = tkinter.Tk()
-    usb_copy()
+    if not os.path.exists(SAVE_DIR):
+        os.makedirs(SAVE_DIR)
+    monitor_usb_drives()
